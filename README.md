@@ -29,6 +29,9 @@ These insights empower stakeholder with key business metrics, enabling strategic
 
 ## License
 
+This project is Licence Under the [MIL license](LICENSE) you are free to use share this project with proper attribution
 
+## About me
+Hi There's I'm **Mahesh Korabu** , I am an IT professional.
 
 
