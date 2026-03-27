@@ -1,0 +1,156 @@
+use DataWarehouse
+
+SELECT
+	sls_ord_num,
+	sls_prd_key,
+	sls_cust_id,
+	sls_order_dt,
+	sls_ship_dt,
+	sls_due_dt,
+	sls_sales,
+	sls_quantity,
+	sls_price
+FROM bronze.crm_sales_details
+--where sls_ord_num != TRIM(sls_ord_num)--No unwanted spaces
+--WHERE sls_prd_key NOT IN (SELECT prd_key FROM silver.crm_prd_info)    --check with another table having rows other than prd_key
+WHERE sls_cust_id NOT IN (SELECT cst_id FROM silver.crm_cust_info)    --check with another table having rows other than prd_key
+
+
+--check the invalid dates, for all order date, ship date, due date
+SELECT
+NULLIF(sls_order_dt, 0) sls_order_Dt
+FROM bronze.crm_sales_details
+WHERE sls_order_dt <= 0 
+OR LEN(sls_order_dt) != 8   -- bad data, bcs its date
+OR sls_order_dt > 20500101 
+OR sls_order_dt < 19000101
+
+--date changing from int to varchar to Date
+SELECT
+	sls_ord_num,
+	sls_prd_key,
+	sls_cust_id,
+	CASE WHEN sls_order_dt = 0 OR LEN(sls_order_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_order_dt AS VARCHAR) AS DATE)
+	END AS sls_order_dt,
+	CASE WHEN sls_ship_dt = 0 OR LEN(sls_ship_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_ship_dt AS VARCHAR) AS DATE)
+	END AS sls_ship_dt,
+	CASE WHEN sls_due_dt = 0 OR LEN(sls_due_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_due_dt AS VARCHAR) AS DATE)
+	END AS sls_due_dt,
+	sls_sales,
+	sls_quantity,
+	sls_price
+FROM bronze.crm_sales_details
+
+--checking order date should less than ship date and due date
+--expectd : No result
+SELECT 
+*
+FROM bronze.crm_sales_details
+WHERE sls_order_dt > sls_ship_dt OR sls_order_dt > sls_due_dt
+
+--checking last 3 cols with sales, quantity and price
+-- >> sales = Quantity * price
+--- >> Values must not be null or zero or neative
+-- this having a issues like -ve, null, 0
+SELECT DISTINCT
+sls_sales,
+sls_quantity,
+sls_price
+FROM bronze.crm_sales_details
+WHERE sls_sales != sls_quantity * sls_price
+OR sls_sales IS NULL OR sls_quantity IS NULL OR sls_price IS NULL
+OR sls_sales <= 0 OR sls_quantity <= 0 OR sls_price <= 0
+order by sls_sales, sls_quantity, sls_price
+
+--Solution1) Data issues will be fixed direct in source system
+-- solution2) Data issues has to be fixed in data warehouse
+
+--if slaes is negative , zero, null derive it using quantity and price
+--if price is zero or null , calculate it using sales and quantity
+-- if price is negative, convert it to a positive value.
+-- correcting
+
+SELECT DISTINCT
+sls_sales as old_sls_sales,
+sls_quantity,
+sls_price as old_sls_price,
+CASE WHEN sls_sales IS NULL OR sls_sales <= 0  OR sls_sales != sls_quantity * abs(sls_price)
+		THEN sls_quantity * abs(sls_price)
+	ELSE sls_sales
+END AS sls_sales,
+CASE WHEN sls_price IS NULL OR sls_price <= 0
+		THEN sls_sales/ NULLIF(sls_quantity, 0)
+	ELSE sls_price
+END AS sls_price
+FROM bronze.crm_sales_details
+
+-- adding above all combine dquery with newone
+
+SELECT
+	sls_ord_num,
+	sls_prd_key,
+	sls_cust_id,
+	CASE WHEN sls_order_dt = 0 OR LEN(sls_order_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_order_dt AS VARCHAR) AS DATE)
+	END AS sls_order_dt,
+	CASE WHEN sls_ship_dt = 0 OR LEN(sls_ship_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_ship_dt AS VARCHAR) AS DATE)
+	END AS sls_ship_dt,
+	CASE WHEN sls_due_dt = 0 OR LEN(sls_due_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_due_dt AS VARCHAR) AS DATE)
+	END AS sls_due_dt,
+	CASE WHEN sls_sales IS NULL OR sls_sales <= 0  OR sls_sales != sls_quantity * abs(sls_price)
+		THEN sls_quantity * abs(sls_price)
+	ELSE sls_sales
+END AS sls_sales,
+	sls_quantity,
+	CASE WHEN sls_price IS NULL OR sls_price <= 0
+		THEN sls_sales/ NULLIF(sls_quantity, 0)
+	ELSE sls_price
+END AS sls_price
+FROM bronze.crm_sales_details
+
+
+use DataWarehouse
+PRINT '>> Truncating table : silver.crm_sales_details'
+TRUNCATE TABLE silver.crm_sales_details
+PRINT '>> INSERTING CLEANED DATA INTO silver.crm_sales_details'
+INSERT INTO silver.crm_sales_details(
+	sls_ord_num,
+	sls_prd_key,
+	sls_cust_id,
+	sls_order_dt,
+	sls_ship_dt,
+	sls_due_dt,
+	sls_sales,
+	sls_quantity,
+	sls_price
+)
+SELECT
+	sls_ord_num,
+	sls_prd_key,
+	sls_cust_id,
+	CASE WHEN sls_order_dt = 0 OR LEN(sls_order_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_order_dt AS VARCHAR) AS DATE)
+	END AS sls_order_dt,
+	CASE WHEN sls_ship_dt = 0 OR LEN(sls_ship_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_ship_dt AS VARCHAR) AS DATE)
+	END AS sls_ship_dt,
+	CASE WHEN sls_due_dt = 0 OR LEN(sls_due_dt) != 8 THEN NULL
+		ELSE CAST(CAST(sls_due_dt AS VARCHAR) AS DATE)
+	END AS sls_due_dt,
+	CASE WHEN sls_sales IS NULL OR sls_sales <= 0  OR sls_sales != sls_quantity * abs(sls_price)
+		THEN sls_quantity * abs(sls_price)
+	ELSE sls_sales
+END AS sls_sales,
+	sls_quantity,
+	CASE WHEN sls_price IS NULL OR sls_price <= 0
+		THEN sls_sales/ NULLIF(sls_quantity, 0)
+	ELSE sls_price
+END AS sls_price
+FROM bronze.crm_sales_details
+
+SELECT * FROM silver.crm_sales_details
