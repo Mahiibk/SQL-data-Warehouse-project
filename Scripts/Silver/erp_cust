@@ -1,0 +1,94 @@
+use DataWarehouse
+
+
+PRINT '>> Truncating table : silver.erp_cust_az12'
+TRUNCATE TABLE silver.erp_cust_az12
+PRINT '>> INSERTING CLEANED DATA INTO silver.erp_cust_az12'
+INSERT INTO silver.erp_cust_az12(
+cid,
+bdate,
+gen
+)
+SELECT
+CASE WHEN cid LIKE 'NAS%' THEN SUBSTRING(cid, 4, LEN(cid)) --Remove 'NAS' prefix is present
+	ELSE cid
+END AS cid,
+CASE WHEN bdate > GETDATE() THEN NULL --set future birth dates to null
+	ELSE bdate
+END AS bdate,
+CASE WHEN UPPER(TRIM(gen)) IN ('F', 'FEMALE') THEN 'FEMALE'
+	WHEN UPPER(TRIM(gen)) IN ('M', 'MALE') THEN 'MALE'
+	ELSE 'n/a'
+END AS gen
+FROM bronze.erp_cust_az12    --Normalize gender values and handle unknown cases
+
+SELECT * from silver.erp_cust_az12
+--check everything in silver data
+
+
+USE DataWarehouse
+
+SELECT
+cid,
+bdate,
+gen
+FROM bronze.erp_cust_az12
+WHERE cid LIKE '%AW00011000%'
+
+--
+SELECT
+cid,
+CASE WHEN cid LIKE 'NAS%' THEN SUBSTRING(cid, 4, LEN(cid))
+	ELSE cid
+END AS cid,
+bdate,
+gen
+FROM bronze.erp_cust_az12
+WHERE CASE WHEN cid LIKE 'NAS%' THEN SUBSTRING(cid, 4, LEN(cid))
+	ELSE cid
+END NOT IN (SELECT DISTINCT cst_key FROM silver.crm_cust_info)-- expecte no result
+
+--identify out of range dates
+SELECT
+bdate
+FROM bronze.erp_cust_az12
+WHERE bdate < '1924-01-01' OR bdate > GETDATE()-- birth date is older than 100 years and future dates
+
+--changing future bdate to be null
+SELECT
+cid,
+CASE WHEN cid LIKE 'NAS%' THEN SUBSTRING(cid, 4, LEN(cid))
+	ELSE cid
+END AS cid,
+CASE WHEN bdate > GETDATE() THEN NULL
+	ELSE bdate
+END AS bdate,
+gen
+FROM bronze.erp_cust_az12
+
+--DATA standardisation and consistenacy
+SELECT DISTINCT gen
+FROM bronze.erp_cust_az12 --not good data
+
+-- correcting data
+SELECT DISTINCT
+gen,
+CASE WHEN UPPER(TRIM(gen)) IN ('F', 'FEMALE') THEN 'FEMALE'
+	WHEN UPPER(TRIM(gen)) IN ('M', 'MALE') THEN 'MALE'
+	ELSE 'n/a'
+END AS gen
+FROM bronze.erp_cust_az12
+
+-- updaing it into table correcting
+SELECT
+CASE WHEN cid LIKE 'NAS%' THEN SUBSTRING(cid, 4, LEN(cid))
+	ELSE cid
+END AS cid,
+CASE WHEN bdate > GETDATE() THEN NULL
+	ELSE bdate
+END AS bdate,
+CASE WHEN UPPER(TRIM(gen)) IN ('F', 'FEMALE') THEN 'FEMALE'
+	WHEN UPPER(TRIM(gen)) IN ('M', 'MALE') THEN 'MALE'
+	ELSE 'n/a'
+END AS gen
+FROM bronze.erp_cust_az12
